@@ -2,106 +2,93 @@
 
 namespace App\Livewire;
 
+use App\Livewire\Forms\ProductForm;
 use App\Models\Product;
-use Illuminate\Container\Attributes\Storage;
+use Illuminate\Support\Facades\Storage;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 use Livewire\WithPagination;
 
-
 class AddProduct extends Component
 {
-    use WithPagination;
     use WithPagination, WithFileUploads;
 
-    public $image;
-    public $oldImage;
+    public ProductForm $form;
+
+    #[Url(history: true)]
     public $search = '';
-    public $product_id;
-    public $product;
-    public $description;
-    public $isEdit = false;
+
+    public bool $isEdit = false;
 
     protected $paginationTheme = 'bootstrap';
 
+    /**
+     * Reset pagination when search query changes.
+     */
     public function updatingSearch()
     {
         $this->resetPage();
     }
 
-
-    public function edit($id)
+    /**
+     * Load product data for editing.
+     */
+    public function edit(Product $product)
     {
-        $product = Product::findOrFail($id);
-
-        $this->product_id = $product->id;
-        $this->product = $product->product;
-        $this->description = $product->description;
-        $this->oldImage = $product->image;
-
+        $this->form->setProduct($product);
         $this->isEdit = true;
+        
         $this->dispatch('open-modal');
     }
 
-
+    /**
+     * Handle form submission for both create and update.
+     */
     public function submit()
     {
-        $this->validate([
-            'product' => 'required',
-            'description' => 'required',
-            'image' => $this->isEdit ? 'nullable|image|max:2048' : 'required|image|max:2048',
-        ]);
-
-        $imagePath = $this->oldImage;
-
-        if ($this->image) {
-            if ($this->oldImage) {
-                Storage::disk('public')->delete($this->oldImage);
-            }
-
-            $imagePath = $this->image->store('products', 'public');
-        }
-
         if ($this->isEdit) {
-            Product::where('id', $this->product_id)->update([
-                'product' => $this->product,
-                'description' => $this->description,
-                'image' => $imagePath,
-            ]);
-
-            session()->flash('success', 'Product updated');
+            $this->form->update();
+            session()->flash('success', 'Product updated successfully.');
         } else {
-            Product::create([
-                'product' => $this->product,
-                'description' => $this->description,
-                'image' => $imagePath,
-            ]);
-
-            session()->flash('success', 'Product added');
+            $this->form->store();
+            session()->flash('success', 'Product added successfully.');
         }
 
-        $this->reset(['product', 'description', 'image', 'oldImage', 'product_id', 'isEdit']);
+        $this->reset(['isEdit']);
         $this->dispatch('close-modal');
     }
 
-
-    public function delete($id)
+    /**
+     * Delete a product and its associated image.
+     */
+    public function delete(Product $product)
     {
-        $product = Product::findOrFail($id);
-
         if ($product->image) {
             Storage::disk('public')->delete($product->image);
         }
 
         $product->delete();
-        session()->flash('success', 'Product deleted');
+        session()->flash('success', 'Product deleted successfully.');
     }
 
+    /**
+     * Reset the form when the modal is closed without saving.
+     */
+    public function resetForm()
+    {
+        $this->form->resetFields();
+        $this->reset(['isEdit']);
+    }
 
     public function render()
     {
-        $products = Product::where('product', 'like', '%' . $this->search . '%')
-            ->orderBy('id', 'desc')
+        $products = Product::query()
+            ->when($this->search, function ($query) {
+                $query->where('product', 'like', '%' . $this->search . '%')
+                      ->orWhere('description', 'like', '%' . $this->search . '%');
+            })
+            ->latest()
             ->paginate(5);
 
         return view('livewire.add-product', compact('products'));
